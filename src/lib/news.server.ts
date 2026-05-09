@@ -38,7 +38,7 @@ export async function fetchQuantumNewsFromAI(): Promise<ArticleItem[]> {
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: USER_PROMPT },
       ],
-      tools: [{ type: "google_search_retrieval" }],
+      tools: [{ google_search: {} }],
     }),
   });
 
