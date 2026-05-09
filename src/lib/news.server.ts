@@ -8,71 +8,68 @@ type ArticleItem = {
   published_at?: string | null;
 };
 
-const SYSTEM_PROMPT = `You are a news aggregator. Given a topic, return the most relevant recent news articles you would find on the first two pages of a Google News search for that topic. Prefer reputable sources, dedupe by URL, and write a concise one-sentence executive summary for each.`;
+// Google News RSS = the simplest no-key crawler that actually returns REAL
+// article URLs. Plain google.com search blocks server-side scraping with a
+// consent/captcha wall, but the news.google.com RSS endpoint is open.
+// We request 2 "pages" worth (~20 items) of "Quantum Computing News".
+const FEED_URL =
+  "https://news.google.com/rss/search?q=quantum+computing+news&hl=en-US&gl=US&ceid=US:en";
 
-const USER_PROMPT = `Find the most relevant recent news articles about quantum computing.
+function pick(xml: string, tag: string): string | null {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+  const m = xml.match(re);
+  if (!m) return null;
+  return m[1]
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
 
-Constraints:
-- Limit to results that would appear on roughly the first two Google search results pages (about 15 to 20 articles maximum).
-- Each article must have a real, working URL.
-- The "summary" must be exactly one sentence (about 20 to 30 words) capturing the core news.
-- Prefer articles published in the last 30 days.
-- Skip duplicates and aggregator pages.
+function toOneSentence(text: string): string {
+  if (!text) return "";
+  // Description from Google News is HTML with a list of related links — strip,
+  // then keep the first sentence.
+  const clean = text.replace(/\s+/g, " ").trim();
+  const m = clean.match(/^(.{20,250}?[.!?])(\s|$)/);
+  return (m ? m[1] : clean.slice(0, 200)).trim();
+}
 
-Return ONLY a JSON object with shape: { "articles": [ { "title": string, "summary": string, "url": string, "source": string, "published_at": string | null } ] }
-"published_at" should be ISO 8601 if known, otherwise null.`;
-
-export async function fetchQuantumNewsFromAI(): Promise<ArticleItem[]> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
-
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
+export async function fetchQuantumNewsFromGoogle(): Promise<ArticleItem[]> {
+  const res = await fetch(FEED_URL, {
     headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+      "User-Agent":
+        "Mozilla/5.0 (compatible; QuantumNewsBot/1.0; +https://lovable.dev)",
+      Accept: "application/rss+xml, application/xml, text/xml",
     },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: USER_PROMPT },
-      ],
-      tools: [{ google_search: {} }],
-    }),
   });
+  if (!res.ok) throw new Error(`Google News RSS error ${res.status}`);
+  const xml = await res.text();
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`AI gateway error [${res.status}]: ${text.slice(0, 500)}`);
+  const items = xml.split(/<item[\s>]/i).slice(1).map((chunk) => "<item " + chunk);
+  const articles: ArticleItem[] = [];
+  for (const item of items) {
+    const title = pick(item, "title");
+    const link = pick(item, "link");
+    const desc = pick(item, "description");
+    const pub = pick(item, "pubDate");
+    const source = pick(item, "source");
+    if (!title || !link) continue;
+    articles.push({
+      title,
+      url: link,
+      summary: toOneSentence(desc ?? title),
+      source: source ?? null,
+      published_at: pub ? new Date(pub).toISOString() : null,
+    });
+    if (articles.length >= 20) break; // first 2 pages worth
   }
-
-  const data = await res.json();
-  const content: string = data?.choices?.[0]?.message?.content ?? "";
-
-  // Extract JSON object from the content (model may wrap with markdown fences)
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error("AI response did not contain JSON");
-  }
-  let parsed: { articles?: ArticleItem[] };
-  try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    throw new Error("Failed to parse AI JSON response");
-  }
-
-  const articles = Array.isArray(parsed.articles) ? parsed.articles : [];
-  return articles
-    .filter(
-      (a) =>
-        a &&
-        typeof a.title === "string" &&
-        typeof a.summary === "string" &&
-        typeof a.url === "string" &&
-        /^https?:\/\//i.test(a.url),
-    )
-    .slice(0, 25);
+  return articles;
 }
 
 export async function refreshArticlesNow(): Promise<{
@@ -81,7 +78,7 @@ export async function refreshArticlesNow(): Promise<{
 }> {
   let articles: ArticleItem[] = [];
   try {
-    articles = await fetchQuantumNewsFromAI();
+    articles = await fetchQuantumNewsFromGoogle();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await supabaseAdmin
@@ -114,7 +111,6 @@ export async function refreshArticlesNow(): Promise<{
     inserted = data?.length ?? 0;
   }
 
-  // Trim to most recent 20 by fetched_at
   const { data: keep } = await supabaseAdmin
     .from("articles")
     .select("id")
