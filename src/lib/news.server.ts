@@ -97,7 +97,7 @@ async function decodeGoogleNewsUrl(url: string): Promise<string> {
       const timestamp = html.match(/data-n-a-ts="([^"]+)"/)?.[1];
       if (!signature || !timestamp) continue;
 
-      const request = [
+      const request = [[
         [
           "Fbv4je",
           JSON.stringify([
@@ -108,7 +108,7 @@ async function decodeGoogleNewsUrl(url: string): Promise<string> {
             signature,
           ]),
         ],
-      ];
+      ]];
 
       const response = await fetch("https://news.google.com/_/DotsSplashUi/data/batchexecute", {
         method: "POST",
