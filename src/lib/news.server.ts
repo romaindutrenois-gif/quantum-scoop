@@ -46,8 +46,8 @@ function pick(xml: string, tag: string): string | null {
     .trim();
 }
 
-function toOneSentence(text: string, fallback: string): string {
-  const clean = cleanText(text || fallback);
+function toOneSentence(text: string, fallback: string, source?: string | null): string {
+  const clean = stripSourceFromTitle(cleanText(text || fallback), source);
   const m = clean.match(/^(.{20,250}?[.!?])(\s|$)/);
   return (m ? m[1] : clean.slice(0, 200)).trim();
 }
@@ -174,7 +174,7 @@ export async function fetchQuantumNewsFromGoogle(): Promise<ArticleItem[]> {
     articles.push({
       title: stripSourceFromTitle(title, source),
       url: link,
-      summary: toOneSentence(desc ?? "", stripSourceFromTitle(title, source)),
+      summary: toOneSentence(desc ?? "", stripSourceFromTitle(title, source), source),
       source: source ?? null,
       published_at: pub ? new Date(pub).toISOString() : null,
     });
