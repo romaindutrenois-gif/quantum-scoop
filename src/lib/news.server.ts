@@ -55,7 +55,7 @@ function toOneSentence(text: string, fallback: string, source?: string | null): 
 function stripSourceFromTitle(title: string, source?: string | null): string {
   const cleanTitle = cleanText(title);
   if (!source) return cleanTitle;
-  return cleanTitle.replace(new RegExp(`\\s+-\\s+${escapeRegExp(source)}$`, "i"), "").trim();
+  return cleanTitle.replace(new RegExp(`(?:\\s+-\\s+|\\s+)${escapeRegExp(source)}$`, "i"), "").trim();
 }
 
 function escapeRegExp(text: string): string {
