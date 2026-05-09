@@ -40,7 +40,10 @@ function pick(xml: string, tag: string): string | null {
   const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
   const m = xml.match(re);
   if (!m) return null;
-  return cleanText(m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"));
+  return decodeEntities(m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"))
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function toOneSentence(text: string, fallback: string): string {
